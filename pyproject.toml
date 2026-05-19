@@ -1,0 +1,8 @@
+[project]
+name = "sentinel-virus-scanner"
+version = "1.0.0"
+description = "Classroom-safe signature-based virus scanner"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

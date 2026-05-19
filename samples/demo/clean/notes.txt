@@ -1,0 +1,2 @@
+This is a clean classroom sample file.
+It should not match any Sentinel signature or heuristic rule.

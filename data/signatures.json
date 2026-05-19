@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "signatures": [
+    {
+      "id": "EICAR.TEST.FILE",
+      "name": "EICAR Standard Antivirus Test File",
+      "severity": "HIGH",
+      "md5": "44d88612fea8a8f36de82e1278abb02f",
+      "sha256": "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f",
+      "hex_pattern": "58 35 4F 21 50 25 40 41 50 5B 34 5C 50 5A 58 35 34 28 50 5E 29 37 43 43 29 37 7D 24 45 49 43 41 52 2D 53 54 41 4E 44 41 52 44 2D 41 4E 54 49 56 49 52 55 53 2D 54 45 53 54 2D 46 49 4C 45 21 24 48 2B 48 2A",
+      "description": "Safe industry-standard antivirus test string used for scanner demonstrations."
+    },
+    {
+      "id": "MOCK.PATTERN.PAYLOAD",
+      "name": "Mock Malware Simulation Payload",
+      "severity": "MEDIUM",
+      "md5": null,
+      "sha256": null,
+      "hex_pattern": "4D 41 4C 57 41 52 45 5F 53 49 4D 55 4C 41 54 49 4F 4E 5F 50 41 59 4C 4F 41 44",
+      "description": "Classroom-only mock payload marker for content pattern matching tests."
+    },
+    {
+      "id": "MOCK.DROPPER.MARKER",
+      "name": "Mock Dropper Marker",
+      "severity": "LOW",
+      "md5": null,
+      "sha256": null,
+      "hex_pattern": "53 45 4E 54 49 4E 45 4C 5F 4D 4F 43 4B 5F 44 52 4F 50 50 45 52",
+      "description": "Classroom-only marker that demonstrates a second hex-pattern signature."
+    }
+  ]
+}
