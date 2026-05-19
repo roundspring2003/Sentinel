@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
+import time
 from typing import Iterable
 
-from .heuristics import DEFAULT_HEURISTIC_RULES, HeuristicRule
-from .signatures import MalwareSignature, SignatureDatabase
+from .heuristics import DEFAULT_HEURISTIC_CONFIG, HeuristicConfig, analyze_file_heuristics, calculate_entropy
+from .signatures import MalwareSignature, SignatureStore
 
 
-CHUNK_SIZE = 1024 * 1024
+CHUNK_SIZE = 8192
 
 
 @dataclass
@@ -24,15 +27,18 @@ class Detection:
     match_type: str
     matched_by: list[str]
     description: str
+    timestamp: str
     details: dict[str, object] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "infected_path": self.path,
             "path": self.path,
             "threat_id": self.threat_id,
             "threat_name": self.threat_name,
             "severity": self.severity,
             "match_type": self.match_type,
+            "timestamp": self.timestamp,
             "matched_by": self.matched_by,
             "description": self.description,
             "details": self.details,
@@ -43,9 +49,10 @@ class Detection:
 class ScanWarning:
     path: str
     message: str
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, str]:
-        return {"path": self.path, "message": self.message}
+        return {"path": self.path, "message": self.message, "timestamp": self.timestamp, "level": "WARNING"}
 
 
 @dataclass
@@ -54,14 +61,28 @@ class ScanResult:
     signature_database: str | None
     started_at: str
     finished_at: str
+    duration_seconds: float
     scanned_file_count: int
     skipped_file_count: int
+    total_bytes_read: int
     detections: list[Detection]
     warnings: list[ScanWarning]
 
     @property
     def detection_count(self) -> int:
         return len(self.detections)
+
+    @property
+    def files_per_second(self) -> float:
+        if self.duration_seconds <= 0:
+            return 0.0
+        return self.scanned_file_count / self.duration_seconds
+
+    @property
+    def megabytes_per_second(self) -> float:
+        if self.duration_seconds <= 0:
+            return 0.0
+        return (self.total_bytes_read / (1024 * 1024)) / self.duration_seconds
 
     def to_dict(self) -> dict[str, object]:
         infected_paths = sorted({detection.path for detection in self.detections})
@@ -70,6 +91,7 @@ class ScanResult:
             "generated_at": self.finished_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "duration_seconds": round(self.duration_seconds, 6),
             "target": self.target,
             "signature_database": self.signature_database,
             "summary": {
@@ -77,75 +99,103 @@ class ScanResult:
                 "skipped_file_count": self.skipped_file_count,
                 "detection_count": self.detection_count,
                 "warning_count": len(self.warnings),
+                "total_bytes_read": self.total_bytes_read,
                 "infected_paths": infected_paths,
+            },
+            "benchmark": {
+                "files_per_second": round(self.files_per_second, 4),
+                "megabytes_per_second": round(self.megabytes_per_second, 4),
             },
             "detections": [detection.to_dict() for detection in self.detections],
             "warnings": [warning.to_dict() for warning in self.warnings],
         }
 
 
+@dataclass
+class FileFeatures:
+    md5: str
+    sha256: str
+    entropy: float
+    bytes_read: int
+    pattern_hits: list[MalwareSignature]
+
+
+@dataclass
+class FileScanOutcome:
+    scanned_file_count: int = 0
+    skipped_file_count: int = 0
+    bytes_read: int = 0
+    detections: list[Detection] = field(default_factory=list)
+    warnings: list[ScanWarning] = field(default_factory=list)
+
+
 def scan_path(
     target: str | Path,
-    database: SignatureDatabase,
-    heuristic_rules: Iterable[HeuristicRule] = DEFAULT_HEURISTIC_RULES,
+    signature_store: SignatureStore,
+    heuristic_config: HeuristicConfig = DEFAULT_HEURISTIC_CONFIG,
+    *,
+    enable_heuristics: bool = True,
+    enable_patterns: bool = True,
+    max_workers: int | None = None,
 ) -> ScanResult:
-    """Scan a file or directory without executing any scanned files."""
+    """Scan a file or directory without executing scanned files."""
 
     target_path = Path(target)
-    started_at = _utc_now()
-    scanned_file_count = 0
-    skipped_file_count = 0
-    detections: list[Detection] = []
-    warnings: list[ScanWarning] = []
-
     if not target_path.exists():
         raise FileNotFoundError(f"target does not exist: {target_path}")
 
-    for file_path in _iter_files(target_path, warnings):
-        display_path = str(file_path)
+    started_at = _utc_now()
+    started_perf = time.perf_counter()
+    walk_warnings: list[ScanWarning] = []
+    pattern_signatures = tuple(signature_store.iter_pattern_signatures()) if enable_patterns else ()
 
-        try:
-            md5_digest, sha256_digest = compute_hashes(file_path)
-            content = file_path.read_bytes()
-        except OSError as exc:
-            skipped_file_count += 1
-            warnings.append(ScanWarning(path=display_path, message=str(exc)))
-            continue
+    outcomes: list[FileScanOutcome] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for outcome in executor.map(
+            lambda path: _scan_file(
+                path,
+                signature_store,
+                pattern_signatures,
+                heuristic_config,
+                enable_heuristics,
+            ),
+            _iter_files(target_path, walk_warnings),
+        ):
+            outcomes.append(outcome)
 
-        scanned_file_count += 1
-        detections.extend(
-            _match_signatures(
-                file_path=display_path,
-                content=content,
-                md5_digest=md5_digest,
-                sha256_digest=sha256_digest,
-                database=database,
-            )
-        )
-        detections.extend(_match_heuristics(display_path, content, heuristic_rules))
+    detections: list[Detection] = []
+    warnings = list(walk_warnings)
+    scanned_file_count = 0
+    skipped_file_count = 0
+    total_bytes_read = 0
+
+    for outcome in outcomes:
+        scanned_file_count += outcome.scanned_file_count
+        skipped_file_count += outcome.skipped_file_count
+        total_bytes_read += outcome.bytes_read
+        detections.extend(outcome.detections)
+        warnings.extend(outcome.warnings)
+
+    detections.sort(key=lambda item: (item.path, item.threat_id, item.match_type))
+    duration_seconds = time.perf_counter() - started_perf
 
     return ScanResult(
         target=str(target_path.resolve()),
-        signature_database=str(database.source_path) if database.source_path else None,
+        signature_database=str(signature_store.source_path),
         started_at=started_at,
         finished_at=_utc_now(),
+        duration_seconds=duration_seconds,
         scanned_file_count=scanned_file_count,
         skipped_file_count=skipped_file_count,
+        total_bytes_read=total_bytes_read,
         detections=detections,
         warnings=warnings,
     )
 
 
 def compute_hashes(path: Path) -> tuple[str, str]:
-    md5 = _new_md5()
-    sha256 = hashlib.sha256()
-
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
-            md5.update(chunk)
-            sha256.update(chunk)
-
-    return md5.hexdigest(), sha256.hexdigest()
+    features = _read_file_features(path, ())
+    return features.md5, features.sha256
 
 
 def write_json_report(result: ScanResult, path: str | Path) -> None:
@@ -165,6 +215,10 @@ def write_text_report(result: ScanResult, path: str | Path) -> None:
         handle.write(f"Target: {result.target}\n")
         handle.write(f"Scanned files: {result.scanned_file_count}\n")
         handle.write(f"Skipped files: {result.skipped_file_count}\n")
+        handle.write(f"Total bytes read: {result.total_bytes_read}\n")
+        handle.write(f"Duration seconds: {result.duration_seconds:.4f}\n")
+        handle.write(f"Files/sec: {result.files_per_second:.2f}\n")
+        handle.write(f"MB/s: {result.megabytes_per_second:.2f}\n")
         handle.write(f"Detections: {result.detection_count}\n\n")
 
         if result.detections:
@@ -184,15 +238,125 @@ def write_text_report(result: ScanResult, path: str | Path) -> None:
                 handle.write(f"- {warning.path}: {warning.message}\n")
 
 
+def _scan_file(
+    file_path: Path,
+    signature_store: SignatureStore,
+    pattern_signatures: tuple[MalwareSignature, ...],
+    heuristic_config: HeuristicConfig,
+    enable_heuristics: bool,
+) -> FileScanOutcome:
+    display_path = str(file_path)
+    if file_path.is_symlink():
+        return FileScanOutcome(
+            skipped_file_count=1,
+            warnings=[ScanWarning(path=display_path, message="symbolic link skipped")],
+        )
+
+    try:
+        features = _read_file_features(file_path, pattern_signatures)
+    except PermissionError as exc:
+        return FileScanOutcome(
+            skipped_file_count=1,
+            warnings=[ScanWarning(path=display_path, message=f"permission denied: {exc}")],
+        )
+    except OSError as exc:
+        return FileScanOutcome(
+            skipped_file_count=1,
+            warnings=[ScanWarning(path=display_path, message=str(exc))],
+        )
+
+    detections = _match_signatures(display_path, features, signature_store)
+    warnings: list[ScanWarning] = []
+
+    if enable_heuristics:
+        findings, heuristic_warnings = analyze_file_heuristics(
+            file_path,
+            entropy=features.entropy,
+            total_bytes=features.bytes_read,
+            config=heuristic_config,
+        )
+        detections.extend(_heuristic_detection(display_path, finding) for finding in findings)
+        warnings.extend(ScanWarning(path=display_path, message=message) for message in heuristic_warnings)
+
+    return FileScanOutcome(
+        scanned_file_count=1,
+        bytes_read=features.bytes_read,
+        detections=detections,
+        warnings=warnings,
+    )
+
+
+def _read_file_features(path: Path, pattern_signatures: Iterable[MalwareSignature]) -> FileFeatures:
+    md5 = _new_md5()
+    sha256 = hashlib.sha256()
+    byte_counts = [0] * 256
+    total_bytes = 0
+    pattern_pairs = tuple(
+        (signature, signature.pattern_bytes)
+        for signature in pattern_signatures
+        if signature.pattern_bytes
+    )
+    max_pattern_length = max((len(pattern) for _, pattern in pattern_pairs), default=0)
+    overlap_size = max(0, max_pattern_length - 1)
+    tail = b""
+    pattern_hits: dict[str, MalwareSignature] = {}
+
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
+            md5.update(chunk)
+            sha256.update(chunk)
+            total_bytes += len(chunk)
+
+            for value, count in Counter(chunk).items():
+                byte_counts[value] += count
+
+            if pattern_pairs:
+                window = tail + chunk
+                for signature, pattern in pattern_pairs:
+                    if signature.id not in pattern_hits and pattern in window:
+                        pattern_hits[signature.id] = signature
+                tail = window[-overlap_size:] if overlap_size else b""
+
+    return FileFeatures(
+        md5=md5.hexdigest(),
+        sha256=sha256.hexdigest(),
+        entropy=calculate_entropy(byte_counts, total_bytes),
+        bytes_read=total_bytes,
+        pattern_hits=list(pattern_hits.values()),
+    )
+
+
 def _iter_files(target_path: Path, warnings: list[ScanWarning]) -> Iterable[Path]:
+    if target_path.is_symlink():
+        warnings.append(ScanWarning(path=str(target_path), message="symbolic link skipped"))
+        return
+
     if target_path.is_file():
         yield target_path
         return
 
-    for root, dirs, files in os.walk(target_path, onerror=lambda exc: _record_walk_error(exc, warnings)):
-        dirs.sort()
+    for root, dirs, files in os.walk(
+        target_path,
+        topdown=True,
+        followlinks=False,
+        onerror=lambda exc: _record_walk_error(exc, warnings),
+    ):
+        root_path = Path(root)
+        kept_dirs: list[str] = []
+        for dirname in sorted(dirs):
+            directory = root_path / dirname
+            if directory.is_symlink():
+                warnings.append(ScanWarning(path=str(directory), message="symbolic link directory skipped"))
+            else:
+                kept_dirs.append(dirname)
+        dirs[:] = kept_dirs
+
         for file_name in sorted(files):
-            yield Path(root) / file_name
+            file_path = root_path / file_name
+            if file_path.is_symlink():
+                warnings.append(ScanWarning(path=str(file_path), message="symbolic link file skipped"))
+            else:
+                yield file_path
 
 
 def _record_walk_error(exc: OSError, warnings: list[ScanWarning]) -> None:
@@ -202,67 +366,50 @@ def _record_walk_error(exc: OSError, warnings: list[ScanWarning]) -> None:
 
 def _match_signatures(
     file_path: str,
-    content: bytes,
-    md5_digest: str,
-    sha256_digest: str,
-    database: SignatureDatabase,
+    features: FileFeatures,
+    signature_store: SignatureStore,
 ) -> list[Detection]:
-    matches: dict[str, set[str]] = {}
+    matches: dict[str, tuple[MalwareSignature, set[str]]] = {}
 
-    for signature in database.match_sha256(sha256_digest):
-        matches.setdefault(signature.id, set()).add("sha256")
-    for signature in database.match_md5(md5_digest):
-        matches.setdefault(signature.id, set()).add("md5")
-    for signature in database.patterns:
-        if signature.pattern_bytes and signature.pattern_bytes in content:
-            matches.setdefault(signature.id, set()).add("hex_pattern")
+    for match in signature_store.lookup_hashes(features.md5, features.sha256):
+        entry = matches.setdefault(match.signature.id, (match.signature, set()))
+        entry[1].update(match.matched_by)
+
+    for signature in features.pattern_hits:
+        entry = matches.setdefault(signature.id, (signature, set()))
+        entry[1].add("hex_pattern")
 
     detections: list[Detection] = []
     for signature_id in sorted(matches):
-        signature = database.by_id[signature_id]
-        detections.append(_signature_detection(file_path, signature, sorted(matches[signature_id])))
-
-    return detections
-
-
-def _signature_detection(file_path: str, signature: MalwareSignature, matched_by: list[str]) -> Detection:
-    return Detection(
-        path=file_path,
-        threat_id=signature.id,
-        threat_name=signature.name,
-        severity=signature.severity,
-        match_type="signature",
-        matched_by=matched_by,
-        description=signature.description,
-    )
-
-
-def _match_heuristics(
-    file_path: str,
-    content: bytes,
-    heuristic_rules: Iterable[HeuristicRule],
-) -> list[Detection]:
-    detections: list[Detection] = []
-
-    for rule in heuristic_rules:
-        indicators = rule.evaluate(content)
-        if not indicators:
-            continue
-
+        signature, fields = matches[signature_id]
         detections.append(
             Detection(
                 path=file_path,
-                threat_id=rule.id,
-                threat_name=rule.name,
-                severity=rule.severity,
-                match_type="heuristic",
-                matched_by=["indicator_strings"],
-                description=rule.description,
-                details={"matched_indicators": indicators},
+                threat_id=signature.id,
+                threat_name=signature.name,
+                severity=signature.severity,
+                match_type="Signature",
+                matched_by=sorted(fields),
+                description=signature.description,
+                timestamp=_utc_now(),
             )
         )
 
     return detections
+
+
+def _heuristic_detection(file_path: str, finding: object) -> Detection:
+    return Detection(
+        path=file_path,
+        threat_id=finding.threat_id,
+        threat_name=finding.threat_name,
+        severity=finding.severity,
+        match_type=finding.match_type,
+        matched_by=list(finding.matched_by),
+        description=finding.description,
+        details=finding.details,
+        timestamp=_utc_now(),
+    )
 
 
 def _new_md5() -> "hashlib._Hash":

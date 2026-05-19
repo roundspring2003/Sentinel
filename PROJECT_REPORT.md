@@ -2,73 +2,85 @@
 
 ## Overview
 
-Sentinel is a functional signature-based virus scanner. It recursively scans a
-target file or directory, computes MD5 and SHA-256 hashes, compares file bytes
-against known hex patterns, applies simple heuristic rules, and writes a JSON
-or text report. It never executes scanned files.
+Sentinel is a defensive Python CLI virus scanner. It recursively scans a target
+file or directory, computes MD5 and SHA-256 hashes using chunks, performs a
+Bloom-filter pre-check, queries an indexed SQLite signature database only when
+necessary, streams hex-pattern checks, applies PE/entropy heuristics, and writes
+JSON or text reports. It never executes scanned files.
 
-## Signature Database Design
+## Hybrid Signature Database
 
-The signature database is stored in `data/signatures.json`. Each record uses
-the same fields: `id`, `name`, `severity`, `md5`, `sha256`, `hex_pattern`, and
-`description`.
+The editable source remains `data/signatures.json`, but runtime scanning uses
+two generated artifacts:
 
-JSON was selected because it is human-readable, easy to edit for a small
-classroom project, and directly supported by Python's standard library. In
-memory, Sentinel converts the JSON list into hash maps:
+- `data/signatures.db`: SQLite database containing `id`, `name`, `severity`, `md5`, `sha256`, `hex_pattern`, and `description`.
+- `data/filter.bloom`: serialized Bloom filter containing known MD5/SHA-256 values.
 
-- `md5_map`: maps an MD5 digest to one or more signatures.
-- `sha256_map`: maps a SHA-256 digest to one or more signatures.
-- `patterns`: stores signatures that include byte patterns.
+`build_db.py` validates the JSON, creates the SQLite table, adds indexes for
+`md5` and `sha256`, and serializes the Bloom filter. At scanner startup, only
+the Bloom filter is loaded into memory. Full signature metadata stays on disk
+and is queried lazily through SQLite.
 
-The hash maps make exact hash lookup average O(1). Pattern matching scans file
-content with byte search, which is simple and suitable for this project size.
-For a larger production scanner, the pattern stage could be replaced with a
-multi-pattern algorithm such as Aho-Corasick or with a Bloom filter pre-check.
+The lookup flow is:
 
-## Scanning Engine
+1. Calculate file MD5/SHA-256 in 8 KB chunks.
+2. Check each digest against the in-memory Bloom filter.
+3. If Bloom misses, skip SQLite hash lookup.
+4. If Bloom hits, query SQLite by indexed hash.
+5. If SQLite has no row, treat the Bloom hit as a false positive.
 
-The scanner walks the target directory recursively using deterministic sorted
-order. For each file, it:
+This design reduces memory use compared with loading the full JSON signature
+list into Python dictionaries.
 
-1. Reads the file in chunks to compute MD5 and SHA-256.
-2. Reads file bytes for hex-pattern and heuristic analysis.
-3. Matches hashes against the in-memory hash maps.
-4. Searches for known byte patterns.
-5. Applies heuristic rules for suspicious strings such as `VirtualAllocEx`,
-   `WriteProcessMemory`, and `CreateRemoteThread`.
+## Scanning Engine And Edge Cases
 
-Unreadable files are skipped with a warning instead of crashing the scanner.
-Empty files are scanned normally and should produce no detections.
+The scanner uses `ThreadPoolExecutor` for concurrent file scanning. Each worker
+reads files in 8 KB chunks, so a large file can be hashed and analyzed without
+loading the entire file into RAM. During the same streaming pass, Sentinel also
+updates byte-frequency counts for entropy calculation and checks hex-pattern
+signatures with chunk overlap.
 
-## Reporting
+Defensive behavior includes:
 
-The JSON report includes the scan target, signature database path, generation
-timestamp, scanned file count, skipped file count, detection count, infected
-paths, detailed detections, and warnings. A plain-text report can also be
-generated for easier reading during the demo.
+- Symbolic links are skipped to avoid recursive link loops.
+- `PermissionError` and other `OSError` failures are recorded as warnings.
+- Empty files are scanned safely and produce no detections.
+- The scanner separates scan failure from malware detection; detections do not crash or abort the run.
 
-## Demonstration Plan
+## Advanced Heuristics
 
-The `samples/demo` folder contains:
+Sentinel implements two advanced heuristic categories:
 
-- A clean text file.
-- A nested EICAR test file.
-- A mock file containing `MALWARE_SIMULATION_PAYLOAD`.
-- A mock suspicious file containing process injection API names.
+- `Heuristic_API`: for Windows PE files beginning with `MZ`, Sentinel uses `pefile` to parse the Import Address Table. Imports such as `CreateRemoteThread`, `VirtualAllocEx`, and `WriteProcessMemory` raise MEDIUM or HIGH risk depending on how many are present.
+- `Heuristic_Entropy`: Sentinel computes Shannon entropy from byte frequencies. Files above 7.5 entropy and at least 1024 bytes are flagged because high randomness may indicate packing or encryption.
 
-Run:
+If `pefile` is unavailable, PE IAT analysis is skipped with a warning; signature
+scanning and entropy analysis still run.
+
+## Reporting And Benchmarking
+
+JSON reports include `infected_path`, `threat_name`, `severity`, `match_type`,
+`timestamp`, scan summary counts, warnings, and benchmark fields. The CLI
+`--benchmark` option prints total scanned files, total scan time, files/sec,
+average MB/s, and total bytes read. These metrics can be copied into the final
+written report to justify the hybrid architecture.
+
+Demo command:
 
 ```bash
-python3 -m sentinel scan samples/demo --db data/signatures.json --report reports/scan.json --text-report reports/scan.txt
+python3 -m sentinel scan samples/demo --db data/signatures.db --bloom data/filter.bloom --report reports/scan.json --text-report reports/scan.txt --benchmark
 ```
 
-The expected result is three detections: one EICAR signature, one mock pattern
-signature, and one heuristic process-injection warning.
+Expected demo detections:
+
+- EICAR test file as `Signature`.
+- Mock pattern payload as `Signature`.
+- High-entropy sample as `Heuristic_Entropy`.
 
 ## Limitations
 
 Sentinel is an educational scanner. It does not unpack archives, emulate
-program behavior, scan memory, or detect unknown malware beyond simple
-heuristic string rules. It is designed to demonstrate safe signature matching
-and reporting concepts for the network security project.
+execution, scan memory, or detect every unknown malware family. The Bloom filter
+can produce false positives, which SQLite resolves during the second lookup
+stage. PE heuristic quality depends on the availability and correctness of the
+`pefile` parser.

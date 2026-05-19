@@ -3,15 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any
+import sqlite3
+import threading
+from typing import Any, Iterable
+
+from .bloom import BloomFilter
 
 
 VALID_SEVERITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
 class MalwareSignature:
-    """A known malware signature loaded from the JSON database."""
+    """A known malware signature loaded lazily from SQLite."""
 
     id: str
     name: str
@@ -23,38 +28,96 @@ class MalwareSignature:
     description: str
 
 
-class SignatureDatabase:
-    """In-memory indexes for hash and byte-pattern signature matching."""
-
-    def __init__(self, signatures: list[MalwareSignature], source_path: Path | None = None) -> None:
-        self.signatures = signatures
-        self.source_path = source_path
-        self.by_id: dict[str, MalwareSignature] = {}
-        self.md5_map: dict[str, list[MalwareSignature]] = {}
-        self.sha256_map: dict[str, list[MalwareSignature]] = {}
-        self.patterns: list[MalwareSignature] = []
-
-        for signature in signatures:
-            if signature.id in self.by_id:
-                raise ValueError(f"duplicate signature id: {signature.id}")
-            self.by_id[signature.id] = signature
-
-            if signature.md5:
-                self.md5_map.setdefault(signature.md5, []).append(signature)
-            if signature.sha256:
-                self.sha256_map.setdefault(signature.sha256, []).append(signature)
-            if signature.pattern_bytes:
-                self.patterns.append(signature)
-
-    def match_md5(self, digest: str) -> list[MalwareSignature]:
-        return self.md5_map.get(digest.lower(), [])
-
-    def match_sha256(self, digest: str) -> list[MalwareSignature]:
-        return self.sha256_map.get(digest.lower(), [])
+@dataclass(frozen=True)
+class SignatureMatch:
+    signature: MalwareSignature
+    matched_by: tuple[str, ...]
 
 
-def load_signature_database(path: str | Path) -> SignatureDatabase:
-    """Load a JSON signature database and build lookup indexes."""
+class SignatureStore:
+    """Bloom-filter backed SQLite store.
+
+    Only the Bloom filter is loaded fully into memory. Signature metadata stays
+    in SQLite and is queried only after a Bloom hit or during explicit pattern
+    iteration.
+    """
+
+    def __init__(self, sqlite_path: str | Path, bloom_filter: BloomFilter) -> None:
+        self.sqlite_path = Path(sqlite_path)
+        self.bloom_filter = bloom_filter
+        self._local = threading.local()
+
+    @property
+    def source_path(self) -> Path:
+        return self.sqlite_path
+
+    def lookup_hashes(self, md5_digest: str, sha256_digest: str) -> list[SignatureMatch]:
+        candidates: list[tuple[str, str]] = []
+        if self.bloom_filter.might_contain(md5_digest):
+            candidates.append(("md5", md5_digest.lower()))
+        if self.bloom_filter.might_contain(sha256_digest):
+            candidates.append(("sha256", sha256_digest.lower()))
+
+        if not candidates:
+            return []
+
+        matched: dict[str, tuple[MalwareSignature, set[str]]] = {}
+        connection = self._connection()
+
+        for field, digest in candidates:
+            rows = connection.execute(
+                f"""
+                SELECT id, name, severity, md5, sha256, hex_pattern, description
+                FROM signatures
+                WHERE {field} = ?
+                """,
+                (digest,),
+            ).fetchall()
+
+            for row in rows:
+                signature = _signature_from_row(row)
+                entry = matched.setdefault(signature.id, (signature, set()))
+                entry[1].add(field)
+
+        return [
+            SignatureMatch(signature=signature, matched_by=tuple(sorted(fields)))
+            for signature, fields in matched.values()
+        ]
+
+    def iter_pattern_signatures(self) -> Iterable[MalwareSignature]:
+        rows = self._connection().execute(
+            """
+            SELECT id, name, severity, md5, sha256, hex_pattern, description
+            FROM signatures
+            WHERE hex_pattern IS NOT NULL AND trim(hex_pattern) != ''
+            ORDER BY id
+            """
+        )
+
+        for row in rows:
+            yield _signature_from_row(row)
+
+    def close(self) -> None:
+        connection = getattr(self._local, "connection", None)
+        if connection is not None:
+            connection.close()
+            self._local.connection = None
+
+    def _connection(self) -> sqlite3.Connection:
+        connection = getattr(self._local, "connection", None)
+        if connection is None:
+            connection = sqlite3.connect(self.sqlite_path)
+            connection.row_factory = sqlite3.Row
+            self._local.connection = connection
+        return connection
+
+
+def load_signature_store(sqlite_path: str | Path, bloom_path: str | Path) -> SignatureStore:
+    return SignatureStore(sqlite_path=sqlite_path, bloom_filter=BloomFilter.load(bloom_path))
+
+
+def load_json_signatures(path: str | Path) -> list[MalwareSignature]:
+    """Load and validate the source JSON used by build_db.py."""
 
     db_path = Path(path)
     with db_path.open("r", encoding="utf-8") as handle:
@@ -64,8 +127,73 @@ def load_signature_database(path: str | Path) -> SignatureDatabase:
     if not isinstance(records, list):
         raise ValueError("signature database must be a list or contain a 'signatures' list")
 
-    signatures = [_signature_from_record(record) for record in records]
-    return SignatureDatabase(signatures, source_path=db_path)
+    return [_signature_from_record(record) for record in records]
+
+
+def write_sqlite_database(signatures: Iterable[MalwareSignature], path: str | Path) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    if output.exists():
+        output.unlink()
+
+    signature_rows = list(signatures)
+    with sqlite3.connect(output) as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute(
+            """
+            CREATE TABLE metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE signatures (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                md5 TEXT,
+                sha256 TEXT,
+                hex_pattern TEXT,
+                description TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute("CREATE INDEX idx_signatures_md5 ON signatures(md5)")
+        connection.execute("CREATE INDEX idx_signatures_sha256 ON signatures(sha256)")
+        connection.execute("CREATE INDEX idx_signatures_hex_pattern ON signatures(hex_pattern)")
+        connection.execute(
+            "INSERT INTO metadata (key, value) VALUES (?, ?)",
+            ("schema_version", str(SCHEMA_VERSION)),
+        )
+        connection.executemany(
+            """
+            INSERT INTO signatures (id, name, severity, md5, sha256, hex_pattern, description)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    signature.id,
+                    signature.name,
+                    signature.severity,
+                    signature.md5,
+                    signature.sha256,
+                    signature.hex_pattern,
+                    signature.description,
+                )
+                for signature in signature_rows
+            ],
+        )
+
+
+def iter_signature_hashes(signatures: Iterable[MalwareSignature]) -> Iterable[str]:
+    for signature in signatures:
+        if signature.md5:
+            yield signature.md5
+        if signature.sha256:
+            yield signature.sha256
 
 
 def _signature_from_record(record: Any) -> MalwareSignature:
@@ -97,6 +225,21 @@ def _signature_from_record(record: Any) -> MalwareSignature:
         hex_pattern=hex_pattern,
         pattern_bytes=pattern_bytes,
         description=description,
+    )
+
+
+def _signature_from_row(row: sqlite3.Row) -> MalwareSignature:
+    hex_pattern = row["hex_pattern"]
+    pattern_bytes = _decode_hex_pattern(row["id"], hex_pattern) if hex_pattern else None
+    return MalwareSignature(
+        id=row["id"],
+        name=row["name"],
+        severity=row["severity"],
+        md5=row["md5"],
+        sha256=row["sha256"],
+        hex_pattern=hex_pattern,
+        pattern_bytes=pattern_bytes,
+        description=row["description"],
     )
 
 
