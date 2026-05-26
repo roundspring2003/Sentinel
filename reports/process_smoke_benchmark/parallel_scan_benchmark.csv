@@ -1,0 +1,5 @@
+executor,workers,repeat,duration_seconds,wall_time_seconds,scanned_file_count,skipped_file_count,detection_count,warning_count,total_bytes_read,files_per_second,megabytes_per_second
+thread,1,1,0.112510,0.114105,1000,0,20,0,4010052,8888.0712,33.9905
+thread,2,1,0.125836,0.126065,1000,0,20,0,4010052,7946.8396,30.3910
+process,1,1,0.114558,0.114851,1000,0,20,0,4010052,8729.1896,33.3829
+process,2,1,0.070490,0.070890,1000,0,20,0,4010052,14186.4625,54.2531

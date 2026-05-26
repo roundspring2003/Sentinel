@@ -42,9 +42,15 @@ class SignatureStore:
     iteration.
     """
 
-    def __init__(self, sqlite_path: str | Path, bloom_filter: BloomFilter) -> None:
+    def __init__(
+        self,
+        sqlite_path: str | Path,
+        bloom_filter: BloomFilter,
+        bloom_path: str | Path | None = None,
+    ) -> None:
         self.sqlite_path = Path(sqlite_path)
         self.bloom_filter = bloom_filter
+        self.bloom_path = Path(bloom_path) if bloom_path is not None else None
         self._local = threading.local()
 
     @property
@@ -113,7 +119,11 @@ class SignatureStore:
 
 
 def load_signature_store(sqlite_path: str | Path, bloom_path: str | Path) -> SignatureStore:
-    return SignatureStore(sqlite_path=sqlite_path, bloom_filter=BloomFilter.load(bloom_path))
+    return SignatureStore(
+        sqlite_path=sqlite_path,
+        bloom_filter=BloomFilter.load(bloom_path),
+        bloom_path=bloom_path,
+    )
 
 
 def load_json_signatures(path: str | Path) -> list[MalwareSignature]:

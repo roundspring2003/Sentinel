@@ -1,0 +1,84 @@
+{
+  "benchmark_name": "parallel_scan_throughput",
+  "manifest": {
+    "file_count": 1000,
+    "payload_size": 2048,
+    "total_payload_bytes": 2005060,
+    "categories": {
+      "clean_text": 640,
+      "clean_binary": 320,
+      "mock_payload": 15,
+      "mock_iat": 4,
+      "eicar": 1,
+      "empty": 20
+    }
+  },
+  "headline": {
+    "baseline_workers": 1,
+    "baseline_files_per_second": 10466.7804,
+    "best_workers": 1,
+    "best_files_per_second": 10466.7804,
+    "best_speedup_vs_baseline": 1.0,
+    "best_throughput_gain_percent": 0.0
+  },
+  "worker_summaries": [
+    {
+      "workers": 1,
+      "runs": 1,
+      "avg_duration_seconds": 0.095636,
+      "median_duration_seconds": 0.095636,
+      "avg_files_per_second": 10466.7804,
+      "median_files_per_second": 10466.7804,
+      "avg_megabytes_per_second": 19.9966,
+      "median_megabytes_per_second": 19.9966,
+      "scanned_file_count": 1001,
+      "detection_count": 20,
+      "warning_count": 0,
+      "speedup_vs_baseline": 1.0,
+      "throughput_gain_percent": 0.0
+    },
+    {
+      "workers": 2,
+      "runs": 1,
+      "avg_duration_seconds": 0.113247,
+      "median_duration_seconds": 0.113247,
+      "avg_files_per_second": 8839.0511,
+      "median_files_per_second": 8839.0511,
+      "avg_megabytes_per_second": 16.8868,
+      "median_megabytes_per_second": 16.8868,
+      "scanned_file_count": 1001,
+      "detection_count": 20,
+      "warning_count": 0,
+      "speedup_vs_baseline": 0.8445,
+      "throughput_gain_percent": -15.55
+    }
+  ],
+  "raw_runs": [
+    {
+      "workers": "1",
+      "repeat": "1",
+      "duration_seconds": "0.095636",
+      "wall_time_seconds": "0.095840",
+      "scanned_file_count": "1001",
+      "skipped_file_count": "0",
+      "detection_count": "20",
+      "warning_count": "0",
+      "total_bytes_read": "2005289",
+      "files_per_second": "10466.7804",
+      "megabytes_per_second": "19.9966"
+    },
+    {
+      "workers": "2",
+      "repeat": "1",
+      "duration_seconds": "0.113247",
+      "wall_time_seconds": "0.113583",
+      "scanned_file_count": "1001",
+      "skipped_file_count": "0",
+      "detection_count": "20",
+      "warning_count": "0",
+      "total_bytes_read": "2005289",
+      "files_per_second": "8839.0511",
+      "megabytes_per_second": "16.8868"
+    }
+  ]
+}

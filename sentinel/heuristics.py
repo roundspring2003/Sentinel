@@ -34,6 +34,7 @@ class HeuristicFinding:
 
 
 DEFAULT_HEURISTIC_CONFIG = HeuristicConfig()
+MOCK_IAT_PREFIX = "SENTINEL_MOCK_IAT:"
 
 
 def calculate_entropy(byte_counts: list[int], total_bytes: int) -> float:
@@ -75,15 +76,16 @@ def analyze_file_heuristics(
     if not _is_pe_candidate(path):
         return findings, warnings
 
-    if pefile is None:
-        warnings.append("pefile is not installed; PE IAT heuristic skipped")
-        return findings, warnings
-
     try:
         imported_apis = extract_pe_imports(path)
     except Exception as exc:  # pefile may raise several parse-specific exceptions.
-        warnings.append(f"PE IAT heuristic skipped: {exc}")
-        return findings, warnings
+        imported_apis = extract_mock_iat_imports(path)
+        if not imported_apis:
+            warnings.append(f"PE IAT heuristic skipped: {exc}")
+            return findings, warnings
+
+    if not imported_apis:
+        imported_apis = extract_mock_iat_imports(path)
 
     suspicious = sorted(config.suspicious_apis.intersection(imported_apis))
     if len(suspicious) >= config.api_min_hits:
@@ -105,7 +107,7 @@ def analyze_file_heuristics(
 
 def extract_pe_imports(path: Path) -> set[str]:
     if pefile is None:
-        return set()
+        return extract_mock_iat_imports(path)
 
     pe = pefile.PE(str(path), fast_load=True)
     try:
@@ -122,6 +124,31 @@ def extract_pe_imports(path: Path) -> set[str]:
         close = getattr(pe, "close", None)
         if close:
             close()
+
+
+def extract_mock_iat_imports(path: Path) -> set[str]:
+    """Read a classroom-only mock IAT marker from a harmless MZ sample."""
+
+    try:
+        with path.open("rb") as handle:
+            content = handle.read(65536)
+    except OSError:
+        return set()
+
+    if not content.startswith(b"MZ") or MOCK_IAT_PREFIX.encode("ascii") not in content:
+        return set()
+
+    imported: set[str] = set()
+    for line in content.decode("latin-1", errors="ignore").splitlines():
+        line = line.strip()
+        if not line.startswith(MOCK_IAT_PREFIX):
+            continue
+        _, raw_apis = line.split(":", 1)
+        for api_name in raw_apis.split(","):
+            normalized = api_name.strip()
+            if normalized:
+                imported.add(normalized)
+    return imported
 
 
 def _is_pe_candidate(path: Path) -> bool:

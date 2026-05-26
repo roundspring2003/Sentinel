@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="540" viewBox="0 0 1080 540">
+  <style>
+    .title { font: 700 24px Arial, sans-serif; fill: #111827; }
+    .subtitle { font: 14px Arial, sans-serif; fill: #4b5563; }
+    .axis { stroke: #111827; stroke-width: 1.4; }
+    .tick { font: 12px Arial, sans-serif; fill: #4b5563; }
+    .label { font: 13px Arial, sans-serif; fill: #111827; }
+    .bartext { font: 12px Arial, sans-serif; fill: #ffffff; font-weight: 700; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <text x="86" y="34" class="title">Sentinel Parallel Scan Throughput</text>
+  <text x="86" y="55" class="subtitle">Average files/sec across repeated scans; process mode bypasses the GIL for CPU-heavy hash/entropy work.</text>
+  <line x1="86" y1="444.00" x2="1038" y2="444.00" stroke="#e5e7eb"/><text x="76" y="448.00" text-anchor="end" class="tick">0</text><line x1="86" y1="369.20" x2="1038" y2="369.20" stroke="#e5e7eb"/><text x="76" y="373.20" text-anchor="end" class="tick">3263</text><line x1="86" y1="294.40" x2="1038" y2="294.40" stroke="#e5e7eb"/><text x="76" y="298.40" text-anchor="end" class="tick">6526</text><line x1="86" y1="219.60" x2="1038" y2="219.60" stroke="#e5e7eb"/><text x="76" y="223.60" text-anchor="end" class="tick">9789</text><line x1="86" y1="144.80" x2="1038" y2="144.80" stroke="#e5e7eb"/><text x="76" y="148.80" text-anchor="end" class="tick">13052</text><line x1="86" y1="70.00" x2="1038" y2="70.00" stroke="#e5e7eb"/><text x="76" y="74.00" text-anchor="end" class="tick">16314</text>
+  <line x1="86" y1="70" x2="86" y2="444" class="axis"/>
+  <line x1="86" y1="444" x2="1038" y2="444" class="axis"/>
+  <rect x="86.00" y="243.89" width="226.00" height="200.11" fill="#dc2626" rx="4"/><rect x="328.00" y="118.78" width="226.00" height="325.22" fill="#16a34a" rx="4"/><rect x="570.00" y="240.25" width="226.00" height="203.75" fill="#2563eb" rx="4"/><rect x="812.00" y="261.82" width="226.00" height="182.18" fill="#f97316" rx="4"/>
+  <text x="199.00" y="468" text-anchor="middle" class="tick">process</text><text x="199.00" y="486" text-anchor="middle" class="tick">1w</text><text x="199.00" y="235.89" text-anchor="middle" class="label">8729</text><text x="199.00" y="261.89" text-anchor="middle" class="bartext">0.98x</text><text x="441.00" y="468" text-anchor="middle" class="tick">process</text><text x="441.00" y="486" text-anchor="middle" class="tick">2w</text><text x="441.00" y="110.78" text-anchor="middle" class="label">14186</text><text x="441.00" y="136.78" text-anchor="middle" class="bartext">1.60x</text><text x="683.00" y="468" text-anchor="middle" class="tick">thread</text><text x="683.00" y="486" text-anchor="middle" class="tick">1w</text><text x="683.00" y="232.25" text-anchor="middle" class="label">8888</text><text x="683.00" y="258.25" text-anchor="middle" class="bartext">1.00x</text><text x="925.00" y="468" text-anchor="middle" class="tick">thread</text><text x="925.00" y="486" text-anchor="middle" class="tick">2w</text><text x="925.00" y="253.82" text-anchor="middle" class="label">7947</text><text x="925.00" y="279.82" text-anchor="middle" class="bartext">0.89x</text>
+  <text x="540.0" y="516" text-anchor="middle" class="label">Executor and workers</text>
+  <text x="22" y="270.0" text-anchor="middle" transform="rotate(-90 22 270.0)" class="label">Average throughput (files/sec)</text>
+</svg>

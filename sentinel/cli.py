@@ -27,7 +27,8 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--bloom", default=str(DEFAULT_BLOOM), help="path to serialized Bloom filter")
     scan_parser.add_argument("--report", default=str(DEFAULT_REPORT), help="path to write JSON report")
     scan_parser.add_argument("--text-report", help="optional path to write a plain-text report")
-    scan_parser.add_argument("--workers", type=int, default=None, help="number of scan worker threads")
+    scan_parser.add_argument("--workers", type=int, default=None, help="number of scan workers")
+    scan_parser.add_argument("--executor", choices=("thread", "process"), default="thread", help="parallel execution backend")
     scan_parser.add_argument("--benchmark", action="store_true", help="print scan performance metrics")
     scan_parser.add_argument(
         "--no-heuristics",
@@ -74,6 +75,7 @@ def _run_scan(args: argparse.Namespace) -> int:
             enable_heuristics=not args.no_heuristics,
             enable_patterns=not args.no_patterns,
             max_workers=args.workers,
+            executor=args.executor,
         )
     finally:
         store.close()
@@ -94,6 +96,7 @@ def _run_scan(args: argparse.Namespace) -> int:
         print(f"- Files/sec: {result.files_per_second:.2f}")
         print(f"- Average disk throughput: {result.megabytes_per_second:.2f} MB/s")
         print(f"- Total bytes read: {result.total_bytes_read}")
+        print(f"- Executor: {args.executor}")
 
     if result.detections:
         print("Detected threats:")

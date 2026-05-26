@@ -1,0 +1,14 @@
+{
+  "file_count": 10000,
+  "payload_size": 4096,
+  "total_payload_bytes": 40100520,
+  "categories": {
+    "clean_text": 6400,
+    "clean_binary": 3200,
+    "mock_payload": 150,
+    "mock_iat": 40,
+    "eicar": 10,
+    "empty": 200
+  },
+  "scan_subdir": "files"
+}

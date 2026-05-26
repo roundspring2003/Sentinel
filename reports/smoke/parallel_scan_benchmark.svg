@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520">
+  <style>
+    .title { font: 700 24px Arial, sans-serif; fill: #111827; }
+    .subtitle { font: 14px Arial, sans-serif; fill: #4b5563; }
+    .axis { stroke: #111827; stroke-width: 1.4; }
+    .tick { font: 12px Arial, sans-serif; fill: #4b5563; }
+    .label { font: 13px Arial, sans-serif; fill: #111827; }
+    .bartext { font: 12px Arial, sans-serif; fill: #ffffff; font-weight: 700; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <text x="86" y="34" class="title">Sentinel Parallel Scan Throughput</text>
+  <text x="86" y="55" class="subtitle">Average files/sec across repeated scans of the same mixed-file dataset.</text>
+  <line x1="86" y1="438.00" x2="858" y2="438.00" stroke="#e5e7eb"/><text x="76" y="442.00" text-anchor="end" class="tick">0</text><line x1="86" y1="364.40" x2="858" y2="364.40" stroke="#e5e7eb"/><text x="76" y="368.40" text-anchor="end" class="tick">2407</text><line x1="86" y1="290.80" x2="858" y2="290.80" stroke="#e5e7eb"/><text x="76" y="294.80" text-anchor="end" class="tick">4815</text><line x1="86" y1="217.20" x2="858" y2="217.20" stroke="#e5e7eb"/><text x="76" y="221.20" text-anchor="end" class="tick">7222</text><line x1="86" y1="143.60" x2="858" y2="143.60" stroke="#e5e7eb"/><text x="76" y="147.60" text-anchor="end" class="tick">9629</text><line x1="86" y1="70.00" x2="858" y2="70.00" stroke="#e5e7eb"/><text x="76" y="74.00" text-anchor="end" class="tick">12037</text>
+  <line x1="86" y1="70" x2="86" y2="438" class="axis"/>
+  <line x1="86" y1="438" x2="858" y2="438" class="axis"/>
+  <rect x="86.00" y="118.00" width="373.00" height="320.00" fill="#2563eb" rx="4"/><rect x="485.00" y="167.76" width="373.00" height="270.24" fill="#dc2626" rx="4"/>
+  <text x="272.50" y="466" text-anchor="middle" class="tick">1</text><text x="272.50" y="110.00" text-anchor="middle" class="label">10467 files/s</text><text x="272.50" y="136.00" text-anchor="middle" class="bartext">1.00x</text><text x="671.50" y="466" text-anchor="middle" class="tick">2</text><text x="671.50" y="159.76" text-anchor="middle" class="label">8839 files/s</text><text x="671.50" y="185.76" text-anchor="middle" class="bartext">0.84x</text>
+  <text x="450.0" y="496" text-anchor="middle" class="label">Worker threads</text>
+  <text x="22" y="260.0" text-anchor="middle" transform="rotate(-90 22 260.0)" class="label">Average throughput (files/sec)</text>
+</svg>

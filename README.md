@@ -48,7 +48,8 @@ python3 -m sentinel scan <target> --db data/signatures.db --bloom data/filter.bl
 
 Useful options:
 
-- `--workers N`: set the number of ThreadPoolExecutor workers.
+- `--workers N`: set the number of scan workers.
+- `--executor thread|process`: choose ThreadPoolExecutor or ProcessPoolExecutor.
 - `--benchmark`: print total time, files/sec, and MB/s.
 - `--text-report reports/scan.txt`: also write a plain-text report.
 - `--no-heuristics`: disable PE IAT and entropy heuristics.

@@ -1,21 +1,26 @@
 from __future__ import annotations
 
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import time
 from typing import Iterable
 
 from .heuristics import DEFAULT_HEURISTIC_CONFIG, HeuristicConfig, analyze_file_heuristics, calculate_entropy
-from .signatures import MalwareSignature, SignatureStore
+from .signatures import MalwareSignature, SignatureStore, load_signature_store
 
 
 CHUNK_SIZE = 8192
+_PROCESS_SIGNATURE_STORE: SignatureStore | None = None
+_PROCESS_PATTERN_SIGNATURES: tuple[MalwareSignature, ...] = ()
+_PROCESS_HEURISTIC_CONFIG: HeuristicConfig = DEFAULT_HEURISTIC_CONFIG
+_PROCESS_ENABLE_HEURISTICS = True
 
 
 @dataclass
@@ -137,31 +142,37 @@ def scan_path(
     enable_heuristics: bool = True,
     enable_patterns: bool = True,
     max_workers: int | None = None,
+    executor: str = "thread",
 ) -> ScanResult:
     """Scan a file or directory without executing scanned files."""
 
     target_path = Path(target)
     if not target_path.exists():
         raise FileNotFoundError(f"target does not exist: {target_path}")
+    if executor not in {"thread", "process"}:
+        raise ValueError("executor must be 'thread' or 'process'")
+    if executor == "process" and signature_store.bloom_path is None:
+        raise ValueError("process executor requires SignatureStore.bloom_path")
 
     started_at = _utc_now()
     started_perf = time.perf_counter()
     walk_warnings: list[ScanWarning] = []
     pattern_signatures = tuple(signature_store.iter_pattern_signatures()) if enable_patterns else ()
 
-    outcomes: list[FileScanOutcome] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for outcome in executor.map(
-            lambda path: _scan_file(
-                path,
-                signature_store,
-                pattern_signatures,
-                heuristic_config,
-                enable_heuristics,
-            ),
-            _iter_files(target_path, walk_warnings),
-        ):
-            outcomes.append(outcome)
+    file_paths = list(_iter_files(target_path, walk_warnings))
+    worker_count = _resolve_worker_count(max_workers, len(file_paths))
+    batches = _batch_files(file_paths, worker_count)
+
+    outcomes = _scan_batches(
+        batches=batches,
+        signature_store=signature_store,
+        pattern_signatures=pattern_signatures,
+        heuristic_config=heuristic_config,
+        enable_heuristics=enable_heuristics,
+        enable_patterns=enable_patterns,
+        worker_count=worker_count,
+        executor=executor,
+    )
 
     detections: list[Detection] = []
     warnings = list(walk_warnings)
@@ -236,6 +247,165 @@ def write_text_report(result: ScanResult, path: str | Path) -> None:
             handle.write("\nWarnings\n")
             for warning in result.warnings:
                 handle.write(f"- {warning.path}: {warning.message}\n")
+
+
+def _scan_batches(
+    *,
+    batches: list[tuple[Path, ...]],
+    signature_store: SignatureStore,
+    pattern_signatures: tuple[MalwareSignature, ...],
+    heuristic_config: HeuristicConfig,
+    enable_heuristics: bool,
+    enable_patterns: bool,
+    worker_count: int,
+    executor: str,
+) -> list[FileScanOutcome]:
+    if not batches:
+        return []
+
+    if worker_count <= 1:
+        return [
+            _scan_file_batch(
+                batches[0],
+                signature_store,
+                pattern_signatures,
+                heuristic_config,
+                enable_heuristics,
+            )
+        ]
+
+    if executor == "process":
+        return _scan_batches_with_processes(
+            batches=batches,
+            signature_store=signature_store,
+            heuristic_config=heuristic_config,
+            enable_heuristics=enable_heuristics,
+            enable_patterns=enable_patterns,
+            worker_count=worker_count,
+        )
+
+    outcomes: list[FileScanOutcome] = []
+    with ThreadPoolExecutor(max_workers=worker_count) as pool:
+        futures = [
+            pool.submit(
+                _scan_file_batch,
+                batch,
+                signature_store,
+                pattern_signatures,
+                heuristic_config,
+                enable_heuristics,
+            )
+            for batch in batches
+        ]
+        for future in futures:
+            outcomes.append(future.result())
+    return outcomes
+
+
+def _scan_batches_with_processes(
+    *,
+    batches: list[tuple[Path, ...]],
+    signature_store: SignatureStore,
+    heuristic_config: HeuristicConfig,
+    enable_heuristics: bool,
+    enable_patterns: bool,
+    worker_count: int,
+) -> list[FileScanOutcome]:
+    bloom_path = signature_store.bloom_path
+    if bloom_path is None:
+        raise ValueError("process executor requires SignatureStore.bloom_path")
+
+    serialized_batches = [tuple(str(path) for path in batch) for batch in batches]
+    outcomes: list[FileScanOutcome] = []
+    with ProcessPoolExecutor(
+        max_workers=worker_count,
+        initializer=_init_process_worker,
+        initargs=(
+            str(signature_store.source_path),
+            str(bloom_path),
+            enable_patterns,
+            heuristic_config,
+            enable_heuristics,
+        ),
+    ) as pool:
+        for outcome in pool.map(_scan_file_batch_process, serialized_batches):
+            outcomes.append(outcome)
+    return outcomes
+
+
+def _init_process_worker(
+    sqlite_path: str,
+    bloom_path: str,
+    enable_patterns: bool,
+    heuristic_config: HeuristicConfig,
+    enable_heuristics: bool,
+) -> None:
+    global _PROCESS_SIGNATURE_STORE
+    global _PROCESS_PATTERN_SIGNATURES
+    global _PROCESS_HEURISTIC_CONFIG
+    global _PROCESS_ENABLE_HEURISTICS
+
+    _PROCESS_SIGNATURE_STORE = load_signature_store(sqlite_path, bloom_path)
+    _PROCESS_PATTERN_SIGNATURES = (
+        tuple(_PROCESS_SIGNATURE_STORE.iter_pattern_signatures()) if enable_patterns else ()
+    )
+    _PROCESS_HEURISTIC_CONFIG = heuristic_config
+    _PROCESS_ENABLE_HEURISTICS = enable_heuristics
+
+
+def _scan_file_batch_process(file_paths: tuple[str, ...]) -> FileScanOutcome:
+    if _PROCESS_SIGNATURE_STORE is None:
+        raise RuntimeError("process worker signature store was not initialized")
+    return _scan_file_batch(
+        tuple(Path(path) for path in file_paths),
+        _PROCESS_SIGNATURE_STORE,
+        _PROCESS_PATTERN_SIGNATURES,
+        _PROCESS_HEURISTIC_CONFIG,
+        _PROCESS_ENABLE_HEURISTICS,
+    )
+
+
+def _resolve_worker_count(max_workers: int | None, file_count: int) -> int:
+    if file_count <= 1:
+        return 1
+    if max_workers is not None:
+        return max(1, max_workers)
+    return min(32, (os.cpu_count() or 1) + 4, file_count)
+
+
+def _batch_files(file_paths: list[Path], worker_count: int) -> list[tuple[Path, ...]]:
+    if not file_paths:
+        return []
+    if worker_count <= 1:
+        return [tuple(file_paths)]
+
+    batch_count = min(len(file_paths), worker_count * 4)
+    batch_size = max(1, math.ceil(len(file_paths) / batch_count))
+    return [tuple(file_paths[index : index + batch_size]) for index in range(0, len(file_paths), batch_size)]
+
+
+def _scan_file_batch(
+    file_paths: Iterable[Path],
+    signature_store: SignatureStore,
+    pattern_signatures: tuple[MalwareSignature, ...],
+    heuristic_config: HeuristicConfig,
+    enable_heuristics: bool,
+) -> FileScanOutcome:
+    batch_outcome = FileScanOutcome()
+    for file_path in file_paths:
+        outcome = _scan_file(
+            file_path,
+            signature_store,
+            pattern_signatures,
+            heuristic_config,
+            enable_heuristics,
+        )
+        batch_outcome.scanned_file_count += outcome.scanned_file_count
+        batch_outcome.skipped_file_count += outcome.skipped_file_count
+        batch_outcome.bytes_read += outcome.bytes_read
+        batch_outcome.detections.extend(outcome.detections)
+        batch_outcome.warnings.extend(outcome.warnings)
+    return batch_outcome
 
 
 def _scan_file(

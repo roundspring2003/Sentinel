@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560">
+  <style>
+    .title { font: 700 24px Arial, sans-serif; fill: #111827; }
+    .subtitle { font: 14px Arial, sans-serif; fill: #4b5563; }
+    .axis { stroke: #111827; stroke-width: 1.4; }
+    .tick { font: 12px Arial, sans-serif; fill: #4b5563; }
+    .label { font: 13px Arial, sans-serif; fill: #111827; }
+    .legend { font: 14px Arial, sans-serif; fill: #111827; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <text x="95" y="32" class="title">Sentinel Memory Architecture Comparison</text>
+  <text x="95" y="52" class="subtitle">Both lines are empirical tracemalloc retained-memory measurements on the same synthetic signature counts.</text>
+  <line x1="95" y1="472.00" x2="935" y2="472.00" stroke="#e5e7eb"/><text x="83" y="476.00" text-anchor="end" class="tick">0</text><line x1="95" y1="390.00" x2="935" y2="390.00" stroke="#e5e7eb"/><text x="83" y="394.00" text-anchor="end" class="tick">33</text><line x1="95" y1="308.00" x2="935" y2="308.00" stroke="#e5e7eb"/><text x="83" y="312.00" text-anchor="end" class="tick">66</text><line x1="95" y1="226.00" x2="935" y2="226.00" stroke="#e5e7eb"/><text x="83" y="230.00" text-anchor="end" class="tick">99</text><line x1="95" y1="144.00" x2="935" y2="144.00" stroke="#e5e7eb"/><text x="83" y="148.00" text-anchor="end" class="tick">132</text><line x1="95" y1="62.00" x2="935" y2="62.00" stroke="#e5e7eb"/><text x="83" y="66.00" text-anchor="end" class="tick">165</text>
+  <line x1="95.00" y1="62" x2="95.00" y2="472" stroke="#f1f5f9"/><text x="95.00" y="500" text-anchor="middle" class="tick">1K</text><line x1="125.36" y1="62" x2="125.36" y2="472" stroke="#f1f5f9"/><text x="125.36" y="500" text-anchor="middle" class="tick">10K</text><line x1="260.30" y1="62" x2="260.30" y2="472" stroke="#f1f5f9"/><text x="260.30" y="500" text-anchor="middle" class="tick">50K</text><line x1="428.98" y1="62" x2="428.98" y2="472" stroke="#f1f5f9"/><text x="428.98" y="500" text-anchor="middle" class="tick">100K</text><line x1="935.00" y1="62" x2="935.00" y2="472" stroke="#f1f5f9"/><text x="935.00" y="500" text-anchor="middle" class="tick">250K</text>
+  <line x1="95" y1="62" x2="95" y2="472" class="axis"/>
+  <line x1="95" y1="472" x2="935" y2="472" class="axis"/>
+  <polyline points="95.00,470.51 125.36,457.33 260.30,394.27 428.98,316.71 935.00,92.37" fill="none" stroke="#dc2626" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="95.00,471.99 125.36,471.94 260.30,471.71 428.98,471.43 935.00,470.58" fill="none" stroke="#2563eb" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="935.00" cy="92.37" r="5" fill="#dc2626"/>
+  <circle cx="935.00" cy="470.58" r="5" fill="#2563eb"/>
+  <text x="923.00" y="80.37" text-anchor="end" class="label">Traditional: 152.42 MB at 250K</text>
+  <text x="923.00" y="460.58" text-anchor="end" class="label">Sentinel Bloom: 0.57 MB at 250K</text>
+  <line x1="121" y1="88" x2="171" y2="88" stroke="#dc2626" stroke-width="4"/>
+  <text x="181" y="93" class="legend">Traditional JSON → Python Hash Map</text>
+  <line x1="121" y1="114" x2="171" y2="114" stroke="#2563eb" stroke-width="4"/>
+  <text x="181" y="119" class="legend">Sentinel Bloom Filter in memory</text>
+  <text x="490.0" y="538" text-anchor="middle" class="label">Signature count</text>
+  <text x="22" y="280.0" text-anchor="middle" transform="rotate(-90 22 280.0)" class="label">Measured retained memory usage (MB)</text>
+</svg>

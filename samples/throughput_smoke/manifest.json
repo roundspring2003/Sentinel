@@ -1,0 +1,13 @@
+{
+  "file_count": 1000,
+  "payload_size": 2048,
+  "total_payload_bytes": 2005060,
+  "categories": {
+    "clean_text": 640,
+    "clean_binary": 320,
+    "mock_payload": 15,
+    "mock_iat": 4,
+    "eicar": 1,
+    "empty": 20
+  }
+}

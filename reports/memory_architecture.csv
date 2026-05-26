@@ -1,0 +1,6 @@
+signature_count,traditional_hashmap_mb,sentinel_bloom_mb,traditional_peak_mb,sentinel_bloom_peak_mb,bloom_bits,bloom_hash_count,false_positive_rate,method
+1000,0.5974,0.0027,0.5974,0.0035,19170,7,0.01,empirical_tracemalloc_current_memory
+10000,5.8882,0.0233,5.8883,0.0240,191701,7,0.01,empirical_tracemalloc_current_memory
+50000,31.2073,0.1147,31.2073,0.1154,958505,7,0.01,empirical_tracemalloc_current_memory
+100000,62.3460,0.2293,62.3461,0.2300,1917011,7,0.01,empirical_tracemalloc_current_memory
+250000,152.4151,0.5717,152.4151,0.5725,4792529,7,0.01,empirical_tracemalloc_current_memory

@@ -1,3 +1,0 @@
-This is pseudo-code for a harmless scanner demo.
-It mentions VirtualAllocEx, WriteProcessMemory, and CreateRemoteThread as text only.
-Sentinel should flag the suspicious indicator sequence without executing this file.

@@ -149,6 +149,28 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(detections[0].match_type, "Heuristic_API")
         self.assertEqual(detections[0].severity, "HIGH")
 
+
+    def test_mock_iat_demo_marker_detects_suspicious_imports_without_pefile(self) -> None:
+        old_pefile = heuristics.pefile
+        heuristics.pefile = None
+        try:
+            with TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "mock_iat.exe").write_bytes(
+                    b"MZ"
+                    + b"\x00" * 128
+                    + b"\nSENTINEL_MOCK_IAT: VirtualAllocEx, WriteProcessMemory, CreateRemoteThread\n"
+                )
+
+                result = scan_path(root, self.store)
+        finally:
+            heuristics.pefile = old_pefile
+
+        detections = [d for d in result.detections if d.threat_id == "HEUR.PE.IAT.SUSPICIOUS_API"]
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].match_type, "Heuristic_API")
+        self.assertIn("CreateRemoteThread", detections[0].matched_by)
+
     def test_empty_file_does_not_crash(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -174,6 +196,20 @@ class ScannerTests(unittest.TestCase):
         self.assertEqual(result.scanned_file_count, 1)
         self.assertEqual(result.skipped_file_count, 0)
         self.assertTrue(any("symbolic link" in warning.message for warning in result.warnings))
+
+
+    def test_process_executor_detects_eicar(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "eicar.txt").write_text(EICAR_TEST_STRING, encoding="utf-8")
+            (root / "clean.txt").write_text("clean", encoding="utf-8")
+
+            result = scan_path(root, self.store, max_workers=2, executor="process")
+
+        eicar_detections = [d for d in result.detections if d.threat_id == "EICAR.TEST.FILE"]
+        self.assertEqual(result.scanned_file_count, 2)
+        self.assertEqual(len(eicar_detections), 1)
+        self.assertIn("md5", eicar_detections[0].matched_by)
 
     def test_report_writer_outputs_required_fields(self) -> None:
         with TemporaryDirectory() as tmp:
